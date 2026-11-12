@@ -1,0 +1,153 @@
+name: mongo-sharding-repl
+
+x-mongo-image: &mongo-image ${MONGO_IMAGE:-dh-mirror.gitverse.ru/mongo:latest}
+
+# Общие настройки узла mongod
+x-mongod: &mongod
+  image: *mongo-image
+  restart: always
+  healthcheck: &healthcheck
+    interval: 5s
+    timeout: 5s
+    retries: 10
+    start_period: 10s
+
+# Узлы replica set конфиг-сервера (config_server)
+x-config-node: &config-node
+  <<: *mongod
+  command: ["mongod", "--configsvr", "--replSet", "config_server", "--bind_ip_all", "--port", "27017"]
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "mongosh", "--port", "27017", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+
+# Узлы replica set шарда 1 (shard1)
+x-shard1-node: &shard1-node
+  <<: *mongod
+  command: ["mongod", "--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27018"]
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "mongosh", "--port", "27018", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+
+# Узлы replica set шарда 2 (shard2)
+x-shard2-node: &shard2-node
+  <<: *mongod
+  command: ["mongod", "--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27019"]
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "mongosh", "--port", "27019", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+
+services:
+  # --- Конфиг-сервер: replica set config_server из 3 узлов ---
+  configSrv1:
+    <<: *config-node
+    container_name: configSrv1
+    volumes:
+      - config1-data:/data/configdb
+
+  configSrv2:
+    <<: *config-node
+    container_name: configSrv2
+    volumes:
+      - config2-data:/data/configdb
+
+  configSrv3:
+    <<: *config-node
+    container_name: configSrv3
+    volumes:
+      - config3-data:/data/configdb
+
+  # --- Шард 1: replica set shard1 из 3 узлов ---
+  shard1-1:
+    <<: *shard1-node
+    container_name: shard1-1
+    volumes:
+      - shard1-1-data:/data/db
+
+  shard1-2:
+    <<: *shard1-node
+    container_name: shard1-2
+    volumes:
+      - shard1-2-data:/data/db
+
+  shard1-3:
+    <<: *shard1-node
+    container_name: shard1-3
+    volumes:
+      - shard1-3-data:/data/db
+
+  # --- Шард 2: replica set shard2 из 3 узлов ---
+  shard2-1:
+    <<: *shard2-node
+    container_name: shard2-1
+    volumes:
+      - shard2-1-data:/data/db
+
+  shard2-2:
+    <<: *shard2-node
+    container_name: shard2-2
+    volumes:
+      - shard2-2-data:/data/db
+
+  shard2-3:
+    <<: *shard2-node
+    container_name: shard2-3
+    volumes:
+      - shard2-3-data:/data/db
+
+  # Роутер: единая точка входа в кластер для приложения.
+  # В --configdb перечислены все узлы replica set конфиг-сервера.
+  mongos_router:
+    image: *mongo-image
+    container_name: mongos_router
+    restart: always
+    command:
+      - mongos
+      - --configdb
+      - config_server/configSrv1:27017,configSrv2:27017,configSrv3:27017
+      - --bind_ip_all
+      - --port
+      - "27020"
+    depends_on:
+      configSrv1: { condition: service_healthy }
+      configSrv2: { condition: service_healthy }
+      configSrv3: { condition: service_healthy }
+      shard1-1: { condition: service_healthy }
+      shard1-2: { condition: service_healthy }
+      shard1-3: { condition: service_healthy }
+      shard2-1: { condition: service_healthy }
+      shard2-2: { condition: service_healthy }
+      shard2-3: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27020", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  pymongo_api:
+    container_name: pymongo_api
+    build:
+      context: api_app
+      dockerfile: Dockerfile
+    restart: always
+    # Роутер станет healthy только после инициализации кластера (scripts/mongo-init.sh),
+    # драйвер подключается лениво — достаточно, чтобы контейнер был запущен
+    depends_on:
+      mongos_router:
+        condition: service_started
+    ports:
+      - 8080:8080
+    environment:
+      MONGODB_URL: "mongodb://mongos_router:27020"
+      MONGODB_DATABASE_NAME: "somedb"
+
+volumes:
+  config1-data:
+  config2-data:
+  config3-data:
+  shard1-1-data:
+  shard1-2-data:
+  shard1-3-data:
+  shard2-1-data:
+  shard2-2-data:
+  shard2-3-data:

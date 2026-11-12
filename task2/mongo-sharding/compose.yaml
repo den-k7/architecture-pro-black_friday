@@ -1,0 +1,91 @@
+name: mongo-sharding
+
+x-mongo-image: &mongo-image ${MONGO_IMAGE:-dh-mirror.gitverse.ru/mongo:latest}
+
+services:
+  # Конфигурационный сервер (replica set из одного узла — обязательное требование MongoDB)
+  configSrv:
+    image: *mongo-image
+    container_name: configSrv
+    restart: always
+    command: ["mongod", "--configsvr", "--replSet", "config_server", "--bind_ip_all", "--port", "27017"]
+    volumes:
+      - config-data:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27017", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Шард 1
+  shard1:
+    image: *mongo-image
+    container_name: shard1
+    restart: always
+    command: ["mongod", "--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27018"]
+    volumes:
+      - shard1-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27018", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Шард 2
+  shard2:
+    image: *mongo-image
+    container_name: shard2
+    restart: always
+    command: ["mongod", "--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27019"]
+    volumes:
+      - shard2-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27019", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Роутер: единая точка входа в шардированный кластер для приложения
+  mongos_router:
+    image: *mongo-image
+    container_name: mongos_router
+    restart: always
+    command: ["mongos", "--configdb", "config_server/configSrv:27017", "--bind_ip_all", "--port", "27020"]
+    depends_on:
+      configSrv:
+        condition: service_healthy
+      shard1:
+        condition: service_healthy
+      shard2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27020", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  pymongo_api:
+    container_name: pymongo_api
+    build:
+      context: api_app
+      dockerfile: Dockerfile
+    restart: always
+    # Роутер станет healthy только после инициализации кластера (scripts/mongo-init.sh),
+    # драйвер подключается лениво — достаточно, чтобы контейнер был запущен
+    depends_on:
+      mongos_router:
+        condition: service_started
+    ports:
+      - 8080:8080
+    environment:
+      MONGODB_URL: "mongodb://mongos_router:27020"
+      MONGODB_DATABASE_NAME: "somedb"
+
+volumes:
+  config-data:
+  shard1-data:
+  shard2-data:
