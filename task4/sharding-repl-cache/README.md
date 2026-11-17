@@ -10,7 +10,7 @@
 | `shard2-1`, `shard2-2`, `shard2-3` | шард 2 | `shard2` | 27019 |
 | `mongos_router` | роутер запросов, к нему подключается приложение | — | 27020 |
 | `redis` | кеш ответов приложения | — | 6379 |
-| `pymongo_api` | приложение, `REDIS_URL: "redis://redis:6379"` | — | 8080 |
+| `pymongo_api` | приложение, образ `kazhem/pymongo_api:1.0.0`, `REDIS_URL: "redis://redis:6379"` | — | 8080 |
 
 База — `somedb`, коллекция — `helloDoc`, ключ шардирования — `{ name: "hashed" }`.
 
@@ -139,9 +139,11 @@ EOF
 
 - `mongo_topology_type: "Sharded"`;
 - `collections.helloDoc.documents_count` — общее количество документов (1000);
-- `collections.helloDoc.shards` — количество документов на каждом шарде;
-- `shards.<шард>.replicas_count` — количество реплик шарда (3), `shards.<шард>.replicas` — адреса реплик;
+- `shards` — шарды и адреса их реплик, например `"shard1": "shard1/shard1-1:27018,shard1-2:27018,shard1-3:27018"` — по 3 реплики в каждом шарде;
 - `cache_enabled: true` — кеширование включено.
+
+Количество документов на каждом шарде и число реплик также печатает `scripts/mongo-init.sh`
+(«shard1: документов 492, реплик 3»); их можно получить командами из раздела «Через mongosh».
 
 Swagger: http://localhost:8080/docs
 

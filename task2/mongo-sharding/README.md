@@ -8,7 +8,7 @@
 | `shard1` | шард 1, replica set `shard1` | 27018 |
 | `shard2` | шард 2, replica set `shard2` | 27019 |
 | `mongos_router` | роутер запросов, к нему подключается приложение | 27020 |
-| `pymongo_api` | приложение | 8080 |
+| `pymongo_api` | приложение, образ `kazhem/pymongo_api:1.0.0` | 8080 |
 
 База — `somedb`, коллекция — `helloDoc`, ключ шардирования — `{ name: "hashed" }`.
 
@@ -91,8 +91,10 @@ EOF
 
 - `mongo_topology_type: "Sharded"`;
 - `collections.helloDoc.documents_count` — общее количество документов (1000);
-- `collections.helloDoc.shards` — количество документов на каждом шарде;
 - `shards` — список шардов и их адреса.
+
+Количество документов на каждом шарде приложение не выводит: его печатает `scripts/mongo-init.sh`,
+а также показывают команды из раздела «Через mongosh».
 
 Swagger: http://localhost:8080/docs
 
